@@ -93,6 +93,8 @@ private:
 	static void vectorScale(float out[3], const float v[3], float scale);
 	static void vectorAdd(float out[3], const float v1[3], const float v2[3]);
 	static void matrixMultiply(const float a[3][3], const float b[3][3], float out[3][3]);
+	static void matrixVectorMultiply(const float a[3][3], const float b[3], float out[3]);
+	static void void initRotationMatrix(float m[3][3], float yaw, float pitch, float roll);
 	void compassHeading()
 
 public:
