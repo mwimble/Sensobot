@@ -84,11 +84,16 @@ private:
 	void readMagn();
 	void readSensors();
 	void resetSensorFusion();
+	void normalize(void);
+	void driftorrection(void);
+	void matrixUpdate(void);
+	void eulerAngles(void);
 	static float vectorDotProduct(const float v1[3], const float v2[3]);
 	static void vectorCrossProduct(float out[3], const float v1[3], const float v2[3]);
 	static void vectorScale(float out[3], const float v[3], float scale);
 	static void vectorAdd(float out[3], const float v1[3], const float v2[3]);
 	static void matrixMultiply(const float a[3][3], const float b[3][3], float out[3][3]);
+	void compassHeading()
 
 public:
 	enum Axis {
