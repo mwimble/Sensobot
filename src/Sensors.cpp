@@ -109,7 +109,7 @@ int Sensors::sendToAndReceiveFromDevice(
 		const int fileHandle,
 		const unsigned char* sendData,
 		const int sendDataLen,
-		const unsigned char* receiveData,
+		const signed char* receiveData,
 		const int receiveDataLen,
 		const int deviceAddress,
 		const char* operation) {
@@ -144,7 +144,7 @@ int Sensors::sendToAndReceiveFromDevice(
 	if (Sensors::DEBUG) {
 		fprintf(stderr, "...raw data block: ");
 		int listOffset = 0;
-		unsigned int i;
+		int i;
 		for (i = 0; i < receiveDataLen; i++) {
 			fprintf(stderr, "%02X: %02X, ", listOffset++, receiveData[i]);
 		}
@@ -466,6 +466,76 @@ void Sensors::dumpCompassSensorBlock() {
 		   compassData[0x0C]);
 }
 
+void Sensors::readMagn() {
+	unsigned char data[2];
+	data[0] = 3;
+	if ((Sensors::sendToAndReceiveFromDevice(
+			compassFileHandle,
+			data,
+			1,
+			&compassData[3],
+			6,
+			Sensors::COMPASS_ADDR, "Compass Block Read pt2")) < 0) {
+		return;
+	}
+
+}
+
+void Sensors::readSensors() {
+	readGyro();
+	readAccel();
+	readMagn();
+}
+
+void Sensors::resetSensorFusion() {
+	  float temp1[3];
+	  float temp2[3];
+	  float xAxis[] = {1.0f, 0.0f, 0.0f};
+
+	  readSensors();
+	  //timestamp = millis();
+
+	  // GET PITCH
+	  // Using y-z-plane-component/x-component of gravity vector
+	  pitch = -atan2(accel[0], sqrt(accel[1] * accel[1] + accel[2] * accel[2]));
+
+	  // GET ROLL
+	  // Compensate pitch of gravity vector
+	  Vector_Cross_Product(temp1, accel, xAxis);
+	  Vector_Cross_Product(temp2, xAxis, temp1);
+	  // Normally using x-z-plane-component/y-component of compensated gravity vector
+	  // roll = atan2(temp2[1], sqrt(temp2[0] * temp2[0] + temp2[2] * temp2[2]));
+	  // Since we compensated for pitch, x-z-plane-component equals z-component:
+	  roll = atan2(temp2[1], temp2[2]);
+
+	  // GET YAW
+	  Compass_Heading();
+	  yaw = MAG_Heading;
+
+	  // Init rotation matrix
+	  init_rotation_matrix(DCM_Matrix, yaw, pitch, roll);
+}
+void Compass_Heading() {
+  float mag_x;
+  float mag_y;
+  float cos_roll;
+  float sin_roll;
+  float cos_pitch;
+  float sin_pitch;
+
+  cos_roll = cos(roll);
+  sin_roll = sin(roll);
+  cos_pitch = cos(pitch);
+  sin_pitch = sin(pitch);
+
+  // Tilt compensated magnetic field X
+  mag_x = magnetom[0] * cos_pitch + magnetom[1] * sin_roll * sin_pitch + magnetom[2] * cos_roll * sin_pitch;
+  // Tilt compensated magnetic field Y
+  mag_y = magnetom[1] * cos_roll - magnetom[2] * sin_roll;
+  // Magnetic Heading
+  MAG_Heading = atan2(-mag_y, mag_x);
+}
+
 float Sensors::getCompassHeading() {
 	float heading = atan2(compassAxisData.y_raw, compassAxisData.x_raw) + declinationRadians;
 	printf("compassAxisData.y_raw: %f, x_raw: %f, atan: %f\n", compassAxisData.y_raw, compassAxisData.x_raw, heading);
@@ -502,85 +572,39 @@ void Sensors::initializeGyro() {
 		return;
 	}
 
-	/*
-	char filename[16];
-	sprintf(filename, "/dev/i2c-1");
-	fprintf(stderr, "Opening %s\n", filename);
-	if ((accelerometerFileHandle = open(filename, O_RDWR)) < 0) {
-		fprintf(stderr, "i2c_open accelerometer open error: %s\n", strerror(errno));
+	int result;
+	unsigned char data[2];
+	data[0] = 0x3E; // Power management
+	data[1] = 0x80; // Reset to defaults
+	if ((result = Sensors::sendToDevice(accelerometerFileHandle, data, 2, Sensors::ACCELEROMETER_ADDR, "Accelerometer 50Hz Rate")) < 0) {
+		fprintf(stderr,"[Sensors::initializeGyro] Reset power management result: %d\n", result);
 		return;
 	}
 
-	if (ioctl(accelerometerFileHandle, I2C_SLAVE, ACCELEROMETER_ADDR) < 0) {
-		fprintf(stderr, "i2c_open accelerometer ioctl error: %s\n", strerror(errno));
+	data[0] = 0x16; // DLPF
+	data[1] = 0x1B; // Full scale. Refresh at 42Hz
+	if ((result = Sensors::sendToDevice(accelerometerFileHandle, data, 2, Sensors::ACCELEROMETER_ADDR, "Accelerometer 50Hz Rate")) < 0) {
+		fprintf(stderr,"[Sensors::initializeGyro] DLPF result: %d\n", result);
 		return;
 	}
 
-	struct i2c_rdwr_ioctl_data msgset;
-	struct i2c_msg msgs[2];
-	unsigned char offset[2] = { ACCELEROMETER_BLOCK_START, 0 };
-
-	offset[0] = 0; // Start register address.
-	offset[1] = 0;
-	msgs[0].addr = ACCELEROMETER_ADDR;
-	msgs[0].flags = 0;
-	msgs[0].len = 1; // Length of data in offset.
-	msgs[0].buf = (__u8 *) offset;
-
-	msgs[1].addr = ACCELEROMETER_ADDR; // Now read the device ID.
-	msgs[1].flags = I2C_M_RD;
-	msgs[1].len = sizeof(deviceId);
-	msgs[1].buf = (__u8 *) deviceId;
-
-	msgset.nmsgs = 2;
-	msgset.msgs = msgs;
-
-	if (ioctl(accelerometerFileHandle, I2C_RDWR, &msgset) < 0) {
-		fprintf(stderr, "i2c_read_no_ack accelerometer read device ID error: %s\n", strerror(errno));
+	data[0] = 0x15; // Sample Rate Divider
+	data[1] = 0x0A; // 50Hz
+	if ((result = Sensors::sendToDevice(accelerometerFileHandle, data, 2, Sensors::ACCELEROMETER_ADDR, "Accelerometer 50Hz Rate")) < 0) {
+		fprintf(stderr,"[Sensors::initializeGyro] Sample Rate Divider result: %d\n", result);
 		return;
 	}
 
-	printf("Accelerometer Device ID: ");
-
-	int listOffset = 0;
-	for (unsigned int i = 0; i < sizeof(deviceId); i++) {
-		printf("%02X: %02X, ", listOffset++, deviceId[i]);
-	}
-
-	printf("\n");
-
-	offset[0] = 0x2D; // POWER_CTL
-	offset[1] = 0x08; // Measure mode.
-	msgs[0].addr = ACCELEROMETER_ADDR;
-	msgs[0].flags = 0;
-	msgs[0].len = 2;
-	msgs[0].buf = (__u8 *) offset;
-
-	msgset.nmsgs = 1;
-	msgset.msgs = msgs;
-
-	if (ioctl(accelerometerFileHandle, I2C_RDWR, &msgset) < 0) {
-		fprintf(stderr, "i2c_read_no_ack accelerometer write register 2D error: %s\n", strerror(errno));
+	data[0] = 0x3E; // Poser management
+	data[1] = 0x00; // Clock sync to internal osc.
+	if ((result = Sensors::sendToDevice(accelerometerFileHandle, data, 2, Sensors::ACCELEROMETER_ADDR, "Accelerometer 50Hz Rate")) < 0) {
+		fprintf(stderr,"[Sensors::initializeGyro] Clock sync to internal: %d\n", result);
 		return;
 	}
 
-	offset[0] = 0x38; // FIFO_CTL
-	offset[1] = 0x84; // Stream watermark level.
-	msgs[0].addr = ACCELEROMETER_ADDR;
-	msgs[0].flags = 0;
-	msgs[0].len = 2;
-	msgs[0].buf = (__u8 *) offset;
-
-	msgset.nmsgs = 1;
-	msgset.msgs = msgs;
-
-	if (ioctl(accelerometerFileHandle, I2C_RDWR, &msgset) < 0) {
-		fprintf(stderr, "i2c_read_no_ack accelerometer FIFO config error: %s\n", strerror(errno));
-		return;
+	if (Sensors::DEBUG) {
+		fprintf(stderr, "[Sensors::initializeGyro] Gyroscope initialized\n");
 	}
-
-	fprintf(stderr, "Accelerometer initialized\n"); //###
-	*/
 }
 
 } /* namespace PositionSensors */
