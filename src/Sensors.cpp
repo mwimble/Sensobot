@@ -21,9 +21,15 @@
 namespace PositionSensors {
 
 Sensors::Sensors() {
+	//DCM_Matrix = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+	//Update_Matrix = {{0, 1, 2}, {3, 4, 5}, {6, 7, 8}};
 	initializeAccelerometer();
 	initializeCompass();
-//	initializeGyro();
+	initializeGyro();
+}
+
+float Sensors::abs(float val) {
+	return val < 0 ? -val : val;
 }
 
 Sensors::~Sensors() {
@@ -635,6 +641,12 @@ void Sensors::normalize(void) {
 
   renorm= .5 *(3 - vectorDotProduct(&temporary[2][0],&temporary[2][0])); //eq.21
   vectorScale(&DCM_Matrix[2][0], &temporary[2][0], renorm);
+}
+
+float Sensors::constrain(float x, float a, float b) {
+	if (x < a) return a;
+	else if (x > b) return b;
+	else return x;
 }
 
 /**************************************************/
